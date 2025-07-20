@@ -164,3 +164,285 @@ Cross-shard запросы: Запросы, требующие доступа к
 
 Данный план предлагает комплексную стратегию шаринга, сочетающую вертикальное и горизонтальное разделение данных. Выбор конкретных технологий и конфигураций зависит от требований к производительности, масштабируемости и отказоустойчивости системы, а также от доступных ресурсов и экспертизы. Важно тщательно продумать ключ шардирования и shard mapping для обеспечения оптимальной производительности и равномерного распределения данных. Также необходимо учитывать сложности, связанные с транзакциями, охватывающими несколько шардов, и разработать стратегию обработки cross-shard запросов.
 
+
+## Задание 3*
+
+Выполните настройку выбранных методов шардинга из задания 2.
+
+Пришлите конфиг Docker и SQL скрипт с командами для базы данных.
+
+## Ответ:
+
+### 1. Конфигурация Docker Compose (docker-compose.yml):
+
+```
+version: "3.8"
+
+services:
+  # ProxySQL
+  proxysql:
+    image: proxysql/proxysql:2.5
+    ports:
+      - "6032:6032"  # Admin interface
+      - "3306:3306"  # Application port
+    volumes:
+      - ./proxysql/proxysql.cnf:/etc/proxysql.cnf
+    depends_on:
+      - mysql_users_shard1
+      - mysql_users_shard2
+      - mysql_books_shard1
+      - mysql_books_shard2
+      - mysql_stores_shard1
+      - mysql_stores_shard2
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+
+  # MySQL - users shard 1
+  mysql_users_shard1:
+    image: mysql:8.0
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: db_users_shard1
+    volumes:
+      - ./mysql/users_shard1/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # MySQL - users shard 2
+  mysql_users_shard2:
+    image: mysql:8.0
+    ports:
+      - "3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: db_users_shard2
+    volumes:
+      - ./mysql/users_shard2/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # MySQL - books shard 1
+  mysql_books_shard1:
+    image: mysql:8.0
+    ports:
+      - "3309:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: db_books_shard1
+    volumes:
+      - ./mysql/books_shard1/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # MySQL - books shard 2
+  mysql_books_shard2:
+    image: mysql:8.0
+    ports:
+      - "3310:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: db_books_shard2
+    volumes:
+      - ./mysql/books_shard2/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # MySQL - stores shard 1
+  mysql_stores_shard1:
+    image: mysql:8.0
+    ports:
+      - "3311:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: db_stores_shard1
+    volumes:
+      - ./mysql/stores_shard1/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # MySQL - stores shard 2
+  mysql_stores_shard2:
+    image: mysql:8.0
+    ports:
+      - "3312:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: db_stores_shard2
+    volumes:
+      - ./mysql/stores_shard2/init.sql:/docker-entrypoint-initdb.d/init.sql
+```
+
+Структура каталогов:
+
+Составим структуру этого каталога:
+
+```
+.
+├── docker-compose.yml
+├── mysql
+│   ├── books_shard1
+│   │   └── init.sql
+│   ├── books_shard2
+│   │   └── init.sql
+│   ├── stores_shard1
+│   │   └── init.sql
+│   ├── stores_shard2
+│   │   └── init.sql
+│   ├── users_shard1
+│   │   └── init.sql
+│   └── users_shard2
+│       └── init.sql
+└── proxysql
+    └── proxysql.cnf
+```
+
+### 2. Скрипты инициализации MySQL (файлы init.sql):
+(Пример для mysql/users_shard1/init.sql)
+
+```
+-- Create the database if it doesn't exist
+CREATE DATABASE IF NOT EXISTS db_users_shard1;
+USE db_users_shard1;
+
+-- Create the users table
+CREATE TABLE IF NOT EXISTS users (
+    user_id INT PRIMARY KEY,
+    username VARCHAR(255),
+    email VARCHAR(255)
+);
+
+-- Insert some sample data (user_id % 2 == 0 for shard1)
+INSERT INTO users (user_id, username, email) VALUES
+(2, 'User2', 'user2@example.com'),
+(4, 'User4', 'user4@example.com'),
+(6, 'User6', 'user6@example.com');
+
+```
+
+(Пример для mysql/users_shard2/init.sql)
+
+```
+-- Create the database if it doesn't exist
+CREATE DATABASE IF NOT EXISTS db_users_shard2;
+USE db_users_shard2;
+
+-- Create the users table
+CREATE TABLE IF NOT EXISTS users (
+    user_id INT PRIMARY KEY,
+    username VARCHAR(255),
+    email VARCHAR(255)
+);
+
+-- Insert some sample data (user_id % 2 != 0 for shard2)
+INSERT INTO users (user_id, username, email) VALUES
+(1, 'User1', 'user1@example.com'),
+(3, 'User3', 'user3@example.com'),
+(5, 'User5', 'user5@example.com');
+
+```
+
+### 3. Конфигурация ProxySQL (proxysql/proxysql.cnf):
+
+```
+[mysql_variables]
+mysql-default_charset=utf8mb4
+mysql-default_collation=utf8mb4_general_ci
+mysql-interfaces = 0.0.0.0:3306
+mysql-monitor_username = monitor
+mysql-monitor_password = monitorpassword
+mysql-monitor_connect_timeout = 1000
+mysql-monitor_read_timeout = 2000
+mysql-monitor_write_timeout = 2000
+
+[mysql_users]
+admin = adminpassword, all
+monitor = monitorpassword, monitor
+
+[mysql_servers]
+users_shard1 = mysql_users_shard1:3306:10
+users_shard2 = mysql_users_shard2:3306:10
+books_shard1 = mysql_books_shard1:3306:10
+books_shard2 = mysql_books_shard2:3306:10
+stores_shard1 = mysql_stores_shard1:3306:10
+stores_shard2 = mysql_stores_shard2:3306:10
+
+[mysql_query_rules]
+# Users rules
+users_shard1_rule = SELECT db_users_shard1 WHERE (dest_host LIKE 'users_shard1') AND (MOD(CAST(substr(SQL, instr(SQL,'user_id')+8, 5) AS UNSIGNED),2) = 0)
+users_shard2_rule = SELECT db_users_shard2 WHERE (dest_host LIKE 'users_shard2') AND (MOD(CAST(substr(SQL, instr(SQL,'user_id')+8, 5) AS UNSIGNED),2) = 1)
+
+# Books rules
+books_shard1_rule = SELECT db_books_shard1 WHERE (dest_host LIKE 'books_shard1') AND (MOD(CAST(substr(SQL, instr(SQL,'book_id')+8, 5) AS UNSIGNED),2) = 0)
+books_shard2_rule = SELECT db_books_shard2 WHERE (dest_host LIKE 'books_shard2') AND (MOD(CAST(substr(SQL, instr(SQL,'book_id')+8, 5) AS UNSIGNED),2) = 1)
+
+# Stores rules
+stores_shard1_rule = SELECT db_stores_shard1 WHERE (dest_host LIKE 'stores_shard1') AND (MOD(CAST(substr(SQL, instr(SQL,'store_id')+9, 5) AS UNSIGNED),2) = 0)
+stores_shard2_rule = SELECT db_stores_shard2 WHERE (dest_host LIKE 'stores_shard2') AND (MOD(CAST(substr(SQL, instr(SQL,'store_id')+9, 5) AS UNSIGNED),2) = 1)
+
+[scheduler]
+# This is a basic example and you will have to write something similar for a production environment
+scheduler_default_timeout = 60000
+
+```
+
+### 4. Инициализация ProxySQL с помощью SQL:
+
+После запуска контейнеров подключимся к интерфейсу администратора ProxySQL (порт 6032):
+
+```
+docker exec -it proxysql mysql -u admin -padminpassword -h 127.0.0.1 -P 6032
+
+```
+Затем выполним следующие команды SQL для настройки ProxySQL:
+
+```
+-- Add MySQL servers to ProxySQL
+INSERT INTO mysql_servers (hostgroup_id, hostname, port, weight, max_connections) VALUES
+(1, 'mysql_users_shard1', 3306, 100, 1000),
+(2, 'mysql_users_shard2', 3306, 100, 1000),
+(3, 'mysql_books_shard1', 3306, 100, 1000),
+(4, 'mysql_books_shard2', 3306, 100, 1000),
+(5, 'mysql_stores_shard1', 3306, 100, 1000),
+(6, 'mysql_stores_shard2', 3306, 100, 1000);
+
+-- Add hostgroups for routing.  Each "group" will only have one actual server due to the shard logic
+-- Hostgroup 1: users_shard1
+-- Hostgroup 2: users_shard2
+-- Hostgroup 3: books_shard1
+-- Hostgroup 4: books_shard2
+-- Hostgroup 5: stores_shard1
+-- Hostgroup 6: stores_shard2
+
+-- Add rules to route queries to the correct hostgroup
+-- These use a very simple shard key based on user_id % 2.
+INSERT INTO mysql_query_rules (rule_id, active, match_pattern, dest_hostgroup, apply) VALUES
+(1, 1, 'SELECT .* FROM users WHERE user_id=([0-9]+)', 1, 1),
+(2, 1, 'SELECT .* FROM books WHERE book_id=([0-9]+)', 3, 1),
+(3, 1, 'SELECT .* FROM stores WHERE store_id=([0-9]+)', 5, 1);
+
+INSERT INTO mysql_query_rules (rule_id, active, match_pattern, dest_hostgroup, apply) VALUES
+(4, 1, 'SELECT .* FROM users WHERE user_id=([0-9]+)', 2, 1),
+(5, 1, 'SELECT .* FROM books WHERE book_id=([0-9]+)', 4, 1),
+(6, 1, 'SELECT .* FROM stores WHERE store_id=([0-9]+)', 6, 1);
+
+
+-- Load configuration and apply it
+LOAD MYSQL SERVERS TO RUNTIME;
+LOAD MYSQL QUERY RULES TO RUNTIME;
+SAVE MYSQL SERVERS TO DISK;
+SAVE MYSQL QUERY RULES TO DISK;
+
+```
+
+### Пример запроса:
+
+```
+SELECT * FROM users WHERE user_id=1;  -- Will be routed to users_shard2
+SELECT * FROM books WHERE book_id=2;  -- Will be routed to books_shard1
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
